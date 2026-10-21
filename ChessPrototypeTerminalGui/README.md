@@ -11,9 +11,9 @@ The board matches the current SharpConsoleUI prototype: original Unicode pieces,
 Install the .NET 10 SDK. From this directory:
 
 ```sh
-dotnet restore ChessPrototypeTerminalGui.sln
-dotnet build ChessPrototypeTerminalGui.sln -c Release --no-restore
-dotnet test ChessPrototypeTerminalGui.sln -c Release --no-build --no-restore
+dotnet restore ChessPrototypeTerminalGui.slnx
+dotnet build ChessPrototypeTerminalGui.slnx -c Release --no-restore
+dotnet test ChessPrototypeTerminalGui.slnx -c Release --no-build --no-restore
 dotnet run --project src/Chess.Tui -c Release --no-build
 ```
 

@@ -24,12 +24,14 @@
 
 ## Build, test, run
 
+Use `.slnx` for existing and new solutions in modern .NET development. Keep build/test commands and documentation pointed at the `.slnx` files.
+
 Run these commands **from this root directory**, using the .NET 10 SDK and runtime:
 
 ```sh
-dotnet restore ChessPrototype/ChessPrototype.sln
-dotnet build ChessPrototype/ChessPrototype.sln -c Release --no-restore
-dotnet test ChessPrototype/ChessPrototype.sln -c Release --no-build --no-restore
+dotnet restore ChessPrototype/ChessPrototype.slnx
+dotnet build ChessPrototype/ChessPrototype.slnx -c Release --no-restore
+dotnet test ChessPrototype/ChessPrototype.slnx -c Release --no-build --no-restore
 dotnet run --project ChessPrototype/src/Chess.Tui -c Release --no-build --no-restore
 ```
 

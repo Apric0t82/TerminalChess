@@ -11,9 +11,9 @@ Install the .NET 10 SDK. All three projects target `net10.0`; running the applic
 From this directory:
 
 ```sh
-dotnet restore ChessPrototype.sln
-dotnet build ChessPrototype.sln -c Release --no-restore
-dotnet test ChessPrototype.sln -c Release --no-build --no-restore
+dotnet restore ChessPrototype.slnx
+dotnet build ChessPrototype.slnx -c Release --no-restore
+dotnet test ChessPrototype.slnx -c Release --no-build --no-restore
 dotnet run --project src/Chess.Tui -c Release --no-build
 ```
 
@@ -90,8 +90,8 @@ No timing heuristic assumes that a stationary held button has been released. Lea
 
 Automated verification on Windows on 2026-10-20 with .NET SDK 10.0.401, targeting `net10.0`:
 
-- Release rebuild (`dotnet build ChessPrototype.sln -c Release --no-restore -t:Rebuild`): succeeded with zero errors and two NU1900 warnings because the NuGet vulnerability feed was unreachable. The same feed warnings occurred in the .NET 8 baseline; dependency vulnerability auditing could not complete.
-- Full test run (`dotnet test ChessPrototype.sln -c Release --no-build --no-restore`): 54 passed, 0 failed, 0 skipped.
+- Release rebuild: succeeded with zero errors and two NU1900 warnings because the NuGet vulnerability feed was unreachable. The same feed warnings occurred in the .NET 8 baseline; dependency vulnerability auditing could not complete.
+- Full test run: 54 passed, 0 failed, 0 skipped.
 - Unit tests cover mapping across every cell, board edges, rank orientation, click/drag transitions, no-motion drops, outside cancellation, leave/reenter, repeated presses, friendly rejection, captures, keyboard navigation, and reset.
 - Adapter tests dispatch through `IMouseAwareControl`, check separate/combined SGR flags, duplicate events, click-only events, multi-click presses, actual canvas rendering of all 32 original symbols at several terminal sizes, drag previews in the smaller squares, ASCII fallback, and resize cancellation.
 - Headless framework tests run real window layout, focus, mouse routing, automatic capture outside the window, keyboard dispatch, and rendering using the package's `HeadlessConsoleDriver` and `BeginHosted` loop.
