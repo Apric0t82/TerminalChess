@@ -1,20 +1,28 @@
 # Chess in the terminal — architecture
 
-Decision record for subsequent development sessions. Updated 2026-10-20.
+Decision record for subsequent development sessions. Updated 2026-10-21.
 
 ## Chosen direction and current state
 
-Build a cross-platform C#/.NET chess application for Windows, Linux, and macOS, with a terminal UI and an AI opponent. **SharpConsoleUI is the chosen UI framework.** Continue development in [ChessPrototype](../ChessPrototype/README.md). The independent [Terminal.Gui prototype](../ChessPrototypeTerminalGui/README.md) remains a comparison experiment; it is not the product's implementation path.
+Build a cross-platform C#/.NET chess application for Windows, Linux, and macOS, with a terminal UI and a future AI opponent. **SharpConsoleUI is the chosen UI framework.** The active application is the new [TerminalChess](../TerminalChess/README.md) solution, created at the user's request for milestone 1. [ChessPrototype](../ChessPrototype/README.md) is retained as the arrangement-mode interaction experiment. The independent [Terminal.Gui prototype](../ChessPrototypeTerminalGui/README.md) also remains a comparison experiment. Neither prototype is the active development target.
 
-The active solution currently targets `net10.0` and uses SharpConsoleUI `2.7.4`. Its executable renders one board through `CanvasControl`, with original Unicode pieces, an ASCII fallback, smaller adaptive squares, selected/target highlighting, drag preview, click-to-move, and keyboard controls. There is no piece-size toggle. Detailed controls, package API findings, and terminal compatibility checks are in the active prototype's README.
+The active solution targets `net10.0` and pins SharpConsoleUI `2.7.4` and Gera.Chess `1.2.0`. Its executable renders one board through `CanvasControl`, with original Unicode pieces, an ASCII fallback, smaller adaptive squares, legal-destination highlighting, drag preview, click-to-move, and keyboard controls. There is no piece-size toggle. Detailed controls and terminal notes are in the application README; the prototype README retains the original framework API investigation.
 
-**Only the UI interaction prototype is implemented.** `GameState` is a temporary arrangement model: any piece of either color can move to an empty square or capture an opposing piece. It rejects friendly-occupied targets but does not enforce movement rules, turns, check, special moves, or game completion. Stockfish, a chess rules library, LLM integration, persistence, and a web API are not integrated.
+**Milestone 1: legal local gameplay is implemented.** Two local players share the board, with enforced turns, legal moves, castling, en passant, explicit Q/R/B/N promotion, check, checkmate, stalemate, draw claims/agreement, resignation, and reset. Draw adjudication has the explicit dead-position limitation below. Stockfish, typed UCI move entry, LLM integration, persistence, and a web API are not integrated. Real-terminal validation across the target operating systems remains outstanding.
 
 ## Chess rules and game state
 
-A **C# chess rules library will be the authoritative source of legal moves and position state**. Do not build a complete chess engine inside this application, and do not use Stockfish or an LLM to validate user moves.
+A **C# chess rules library is the authoritative source of legal moves and position state**. Do not build a complete chess engine inside this application, and do not use Stockfish or an LLM to validate user moves.
 
-The particular rules library has **not been selected**. Evaluate candidates when legal gameplay is requested, including .NET/platform compatibility, legal move generation, check handling, castling, en passant, promotion, game outcomes, position notation, maintenance, and suitability for automated tests. No earlier brainstorm should be interpreted as a confirmed package choice.
+The user confirmed **Gera.Chess 1.2.0**, after reviewing draws, promotion, maintenance, licensing, and future UCI notation input. The [evaluation](chess-library-evaluation.md) records alternatives and qualifications. The package targets .NET 8 and runs under this application's .NET 10 target. MIT notices for the rules integration are included in the application.
+
+`TerminalChess.Rules/GeraGame` implements the application-owned `IChessGame` contract and owns the sole live Gera position. It caches legal moves at transitions using the per-piece generator rather than the all-pieces overload's task-and-wait implementation. Rendering and input consume application-owned values; they do not use Gera types. Immutable snapshots include FEN, side to move, check, outcome, pieces, and a monotonically increasing revision.
+
+Gera's optional automatic draw rules are disabled. The adapter derives repetition identities/counts from accepted positions, accounting for side to move, castling rights, and legally usable en passant targets. It supports claimable threefold/50-move draws (including intended-move claims without committing the move), automatic fivefold/75-move draws, and agreement after both players have moved. Checkmate takes precedence at the 75-move boundary. Conservative material draws cover bare kings, one minor piece versus a bare king, and bishops all confined to one square color. Two knights versus king is not automatically drawn. **Arbitrary dead positions, including blocked pawn positions, are not generally recognized.** No clocks or timeout adjudication are implemented.
+
+An additional tested adapter correction makes castling-right losses permanent: Gera can otherwise allow a replacement rook to regain a captured rook's rights. On a loss of rights, the adapter rebases the library position through FEN, preserving turn, en passant and move counters. This retains a single authoritative library board. A temporary library position can be used to evaluate an intended draw claim and is discarded without changing the live game.
+
+Promotion remains pending in the interaction state until an explicit keyboard or footer-button choice is made; Escape and geometry changes cancel it without changing the position. Mouse, keyboard, and future typed input all submit source/destination/promotion intents. Typed UCI moves such as `e2e4` or `e7e8n` are explicitly deferred; Gera's lack of complete direct UCI parsing will be handled by a later notation adapter. Full UCI transport belongs to Stockfish infrastructure.
 
 Keep application-owned concepts such as squares, move intents, results, and position snapshots at the application boundary. Introduce only the adapter needed to keep a selected library's types from spreading through rendering and input code. Avoid a second mutable position model that can disagree with the rules library.
 
@@ -56,14 +64,15 @@ Maintain a clean separation of responsibilities without creating projects solely
 
 | Boundary | Responsibility | Current implementation / intended growth |
 | --- | --- | --- |
-| Domain | Chess concepts and authoritative position/rule behavior | `Chess.Core/Domain`; temporary `GameState` will be replaced by the chosen rules integration |
-| Application | Move orchestration, interaction state, opponent turns, cancellation, and position revisions | `Chess.Core/Interaction` currently holds UI-independent input state; add a game coordinator when gameplay requires it |
-| TUI | Rendering, layout, focus, controls, glyphs, colors, and translation of framework events | `Chess.Tui/ChessBoardControl` and startup composition in `Program` |
-| Infrastructure | Rules-package adaptation where needed, Stockfish process/UCI, and optional LLM provider access | Not yet present; add implementations when the corresponding milestone is requested |
+| Domain / application contracts | Chess values, move intents, immutable snapshots, outcomes, and `IChessGame` | `TerminalChess.Core/Domain` |
+| Application | Selection, drag/cursor state, promotion choice, move and draw commands | `TerminalChess.Core/Interaction`; add opponent orchestration when required |
+| TUI | Rendering, layout, focus, controls, glyphs, colors, and translation of framework events | `TerminalChess.Tui/ChessBoardControl` and startup composition in `Program` |
+| Rules adaptation | Single authoritative Gera position, cached legal moves, draw metadata, and package corrections | `TerminalChess.Rules/GeraGame` |
+| Future infrastructure | Stockfish process/UCI and optional LLM provider access | Deferred until the corresponding milestone is requested |
 
-`Chess.Core` must remain free of SharpConsoleUI, Terminal.Gui, UCI transport, and LLM SDK types. The application depends on domain concepts and the small service contracts it actually needs. Infrastructure implements those contracts and depends inward. The executable composes the implementations and views. A rules-package adapter may sit at the domain/application boundary; this does not create an alternate authority for legality.
+`TerminalChess.Core` must remain free of UI-framework, rules-package, UCI transport, and LLM SDK types. The application depends on domain concepts and the small service contracts it actually needs. Adapters implement those contracts and depend inward. The executable composes the implementations and views. The rules-package adapter sits at the domain/application boundary; this does not create an alternate board or move generator.
 
-The current core combines domain and interaction code in one assembly, separated by folders/namespaces. Splitting out `Chess.Application` or `Chess.Infrastructure` is appropriate once real feature dependencies justify it, not a prerequisite to every change. The view currently owns the temporary interaction/model object; introduce application-level game ownership when rules and asynchronous opponents arrive.
+The core combines application-owned chess concepts and interaction code in one assembly, separated by folders/namespaces. Rules adaptation is a separate assembly because it owns the third-party dependency. The executable creates one `GeraGame` and injects it into interaction and rendering; input commands serialize transitions on the UI thread. Introduce further application/infrastructure components only as real dependencies require them.
 
 Keep game transitions serialized under one application owner. Engine and LLM work should consume snapshots and return results that the application can accept or discard. Neither background work nor rendering may mutate a position independently.
 
@@ -88,13 +97,13 @@ These milestones record direction and acceptance goals. They do not authorize im
 | Milestone | State | Acceptance goal |
 | --- | --- | --- |
 | 0. Board interaction prototype | Implemented; real-terminal validation remains | Runnable SharpConsoleUI board, drag/drop, click/keyboard fallback, highlights, mapping/state tests, and documented terminal limitations |
-| 1. Legal local gameplay | Planned | Select/integrate a C# rules library; enforce turns and legal moves; support special moves, promotion choice, check/outcomes; test rejection and position consistency |
+| 1. Legal local gameplay | Implemented in TerminalChess; real-terminal validation remains | Gera integration, enforced turns/legal moves, special moves, promotion choice, check/outcomes, draw policy with documented dead-position limitation, and rejection/position-consistency tests |
 | 2. Stockfish opponent | Planned after legal gameplay | UCI adapter, asynchronous searches, validated opponent moves, cancellation/stale-result protection, process cleanup, and useful engine-failure behavior |
 | 3. Opponent configuration | Planned after engine play | Small, tested difficulty/search settings and personality hooks while preserving deterministic, valid game state |
 | 4. Optional LLM features | Planned after the rules/engine path works | Optional conversation/personality/commentary with provider failure fallback and no authority over game legality |
 | 5. Cross-platform hardening | Ongoing as features mature | Validate intended terminals on Windows/Linux/macOS; improve packaging, engine discovery, diagnostics, cleanup, and automated platform coverage |
 
-Persistence, a web API, extra UI panels, and additional application frontends are outside the agreed prototype scope. Their design remains deferred until requested.
+Persistence, a web API, extra UI panels, and additional application frontends remain outside the agreed scope. Typed UCI move entry is a requested future capability, explicitly excluded from the milestone 1 iteration.
 
 ## Verification and continuity
 
@@ -104,4 +113,4 @@ For the rules milestone, test legality, special moves, rejection without mutatio
 
 Keep automated verification distinct from manual validation. Headless tests cannot establish mouse behavior or font appearance in a real emulator. Use the README checklist for drag/release outside the board and terminal, rapid clicks, resize, keyboard-only play, ASCII fallback, and terminal restoration on exit.
 
-Update this document when an architectural decision changes or a planned component becomes implemented. Keep package-specific implementation detail and running instructions in the prototype README; keep concise repository instructions in `AGENTS.md`.
+Update this document when an architectural decision changes or a planned component becomes implemented. Keep package-specific implementation detail and running instructions in the active application README; keep concise repository instructions in `AGENTS.md`.

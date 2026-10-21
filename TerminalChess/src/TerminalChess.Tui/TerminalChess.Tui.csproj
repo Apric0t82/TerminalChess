@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="../TerminalChess.Core/TerminalChess.Core.csproj" />
+    <ProjectReference Include="../TerminalChess.Rules/TerminalChess.Rules.csproj" />
+    <PackageReference Include="SharpConsoleUI" Version="2.7.4" />
+  </ItemGroup>
+
+</Project>
