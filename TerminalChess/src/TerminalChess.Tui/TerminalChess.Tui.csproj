@@ -9,6 +9,7 @@
 
   <ItemGroup>
     <ProjectReference Include="../TerminalChess.Core/TerminalChess.Core.csproj" />
+    <ProjectReference Include="../TerminalChess.Infrastructure/TerminalChess.Infrastructure.csproj" />
     <ProjectReference Include="../TerminalChess.Rules/TerminalChess.Rules.csproj" />
     <PackageReference Include="SharpConsoleUI" Version="2.7.4" />
   </ItemGroup>

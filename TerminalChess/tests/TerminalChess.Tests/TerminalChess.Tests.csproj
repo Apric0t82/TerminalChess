@@ -11,6 +11,8 @@
 
   <ItemGroup>
     <ProjectReference Include="../../src/TerminalChess.Core/TerminalChess.Core.csproj" />
+    <ProjectReference Include="../../src/TerminalChess.Infrastructure/TerminalChess.Infrastructure.csproj" />
+    <ProjectReference Include="../FakeUciEngine/FakeUciEngine.csproj" />
     <ProjectReference Include="../../src/TerminalChess.Rules/TerminalChess.Rules.csproj" />
     <ProjectReference Include="../../src/TerminalChess.Tui/TerminalChess.Tui.csproj" />
   </ItemGroup>

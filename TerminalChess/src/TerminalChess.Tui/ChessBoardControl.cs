@@ -1,4 +1,5 @@
 using TerminalChess.Core.Domain;
+using TerminalChess.Core.Application;
 using TerminalChess.Core.Interaction;
 using SharpConsoleUI;
 using SharpConsoleUI.Controls;
@@ -31,6 +32,9 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
 
     public ChessBoardInteraction Interaction { get; }
     public bool AsciiPieces => _ascii;
+    public string PersistenceStatus { get; set; } = "";
+    public event Action? SaveRequested;
+    public event Action? LoadRequested;
 
     public ChessBoardControl(ChessBoardInteraction interaction, bool ascii = false) : base(80, 25)
     {
@@ -47,6 +51,13 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
     public void HandleKey(ConsoleKeyInfo key)
     {
         _promotionPressed = null;
+        var session = Interaction.Game as GameSession;
+        if (key.Key == ConsoleKey.F5) { SaveRequested?.Invoke(); Refresh(); return; }
+        if (key.Key == ConsoleKey.F9) { LoadRequested?.Invoke(); Refresh(); return; }
+        PersistenceStatus = "";
+        if (key.Key == ConsoleKey.T) { session?.StartOpponent(); Refresh(); return; }
+        if (key.Key == ConsoleKey.L) { session?.UseLocalPlayers(); Refresh(); return; }
+        if (key.Key == ConsoleKey.Escape && session?.IsThinking == true) session.CancelOpponent();
         if (Interaction.PendingPromotion is not null && (key.Modifiers & (ConsoleModifiers.Control | ConsoleModifiers.Alt)) == 0
             && key.Key is ConsoleKey.Q or ConsoleKey.R or ConsoleKey.B or ConsoleKey.N)
             Interaction.ChoosePromotion(key.Key switch
@@ -81,6 +92,7 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
     public new bool ProcessMouseEvent(MouseEventArgs args)
     {
         if (!IsEnabled) return false;
+        if (args.HasAnyFlag(MouseFlags.Button1Pressed, MouseFlags.Button1Clicked)) PersistenceStatus = "";
         if (Interaction.PendingPromotion is not null && _mapper is not null
             && args.Position.Y - Margin.Top == _promotionRow)
         {
@@ -150,7 +162,9 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
     private void Draw(CanvasGraphics graphics, int width, int height)
     {
         graphics.FillRect(0, 0, width, height, Background);
-        graphics.WriteString(2, 0, "TERMINAL CHESS / local game", Color.White, Background);
+        var session = Interaction.Game as GameSession;
+        graphics.WriteString(2, 0, session?.EngineSide is { } side
+            ? $"TERMINAL CHESS / Stockfish: {side}" : "TERMINAL CHESS / local game", Color.White, Background);
         if (width < 48 || height < 25)
         {
             _promotionPressed = null;
@@ -162,7 +176,11 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
         }
 
         graphics.WriteString(2, 1, GameSummary(), Color.White, Background);
-        if (Interaction.Game.DrawOffer is { } offer)
+        if (!string.IsNullOrEmpty(PersistenceStatus))
+            graphics.WriteString(2, 2, PersistenceStatus, Muted, Background);
+        else if (session is not null && !string.IsNullOrEmpty(session.Status))
+            graphics.WriteString(2, 2, session.Status, Muted, Background);
+        else if (Interaction.Game.DrawOffer is { } offer)
             graphics.WriteString(2, 2, $"{offer} offers a draw. Opponent: Y/N", Muted, Background);
         else if (Interaction.Game.CanClaimDraw)
             graphics.WriteString(2, 2, "Draw available. C: claim or continue playing", Muted, Background);
@@ -215,11 +233,15 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
 
         var footer = mapper.Top + mapper.Height + 2;
         _promotionRow = footer + 1;
-        graphics.WriteString(2, footer, Interaction.Status, Color.White, Background);
+        var status = session is not null && !string.IsNullOrEmpty(session.Status) ? session.Status : Interaction.Status;
+        // Keep recovery keys visible at the minimum supported terminal width.
+        if (session is { IsHumanTurn: false, IsThinking: false } && Interaction.Game.Outcome is null)
+            status = "Engine paused/failed. T:retry L:local";
+        graphics.WriteString(2, footer, status, Color.White, Background);
         graphics.WriteString(2, footer + 1, Interaction.PendingPromotion is not null
             ? "[Q queen][R rook] [B bishop] [N knight]"
             : "Drag/click; Arrows/WASD + Enter/Space", Muted, Background);
-        graphics.WriteString(2, footer + 2, "C: claim  F: offer draw  Y/N: answer", Muted, Background);
+        graphics.WriteString(2, footer + 2, "F5:save F9:load C:claim F:draw Y/N:answer", Muted, Background);
         graphics.WriteString(2, footer + 3, "Esc:cancel R:new U:ASCII X:resign Ctrl+Q:quit", Muted, Background);
     }
 

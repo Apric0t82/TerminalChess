@@ -6,10 +6,12 @@
   </Configurations>
   <Folder Name="/src/">
     <Project Path="src/TerminalChess.Core/TerminalChess.Core.csproj" />
+    <Project Path="src/TerminalChess.Infrastructure/TerminalChess.Infrastructure.csproj" />
     <Project Path="src/TerminalChess.Rules/TerminalChess.Rules.csproj" />
     <Project Path="src/TerminalChess.Tui/TerminalChess.Tui.csproj" />
   </Folder>
   <Folder Name="/tests/">
+    <Project Path="tests/FakeUciEngine/FakeUciEngine.csproj" />
     <Project Path="tests/TerminalChess.Tests/TerminalChess.Tests.csproj" />
   </Folder>
 </Solution>

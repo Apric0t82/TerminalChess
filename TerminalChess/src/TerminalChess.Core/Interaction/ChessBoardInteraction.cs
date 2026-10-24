@@ -1,4 +1,5 @@
 using TerminalChess.Core.Domain;
+using TerminalChess.Core.Application;
 
 namespace TerminalChess.Core.Interaction;
 
@@ -21,6 +22,7 @@ public sealed class ChessBoardInteraction(IChessGame game)
 
     public void Pointer(PointerAction action, Square? square)
     {
+        if (Game is GameSession { IsHumanTurn: false } && action != PointerAction.Cancel) return;
         if (PendingPromotion is not null && action != PointerAction.Cancel) return;
         if (Game.Outcome is not null && action != PointerAction.Cancel) return;
         switch (action)
@@ -75,6 +77,7 @@ public sealed class ChessBoardInteraction(IChessGame game)
         EndGesture();
         if (command == BoardCommand.Cancel) { Cancel(); return; }
         if (command == BoardCommand.Reset) { Game.Reset(); Cancel(); Status = "New game. White to move."; return; }
+        if (Game is GameSession { IsHumanTurn: false }) return;
         if (PendingPromotion is not null)
         {
             if (command == BoardCommand.ClaimDraw)

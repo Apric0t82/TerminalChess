@@ -11,6 +11,8 @@
 
 - `TerminalChess/src/TerminalChess.Core/Domain/`: application-owned chess values, move intents, snapshots, and the game contract.
 - `TerminalChess/src/TerminalChess.Core/Interaction/`: framework-independent interaction state machine and terminal-cell coordinate mapper.
+- `TerminalChess/src/TerminalChess.Core/Application/`: serialized game session, opponent orchestration, stale-result protection, and replayable save contracts.
+- `TerminalChess/src/TerminalChess.Infrastructure/`: local Stockfish UCI subprocess and JSON file persistence.
 - `TerminalChess/src/TerminalChess.Rules/`: authoritative Gera position, legal-move adaptation, draw adjudication, and castling-right normalization.
 - `TerminalChess/src/TerminalChess.Tui/`: executable, SharpConsoleUI rendering, and translation of framework events into core actions.
 - `TerminalChess/tests/TerminalChess.Tests/`: xUnit tests for rules, draws, mapping, interaction, UI event adaptation, rendering, and headless window routing.
@@ -46,6 +48,7 @@ For application changes, build and run the relevant existing tests. Add focused 
 - The active application enforces legal local chess. The retained `ChessPrototype/` remains arrangement mode. Draw adjudication covers the documented material cases, not arbitrary dead positions.
 - Preserve the original Unicode symbols, ASCII fallback, smaller adaptive squares, drag-and-drop, click-to-move, keyboard navigation, highlighting, outside-board cancellation, and Escape recovery. There is no piece-size toggle or pixel-art renderer.
 - Mouse capture is application routing, not OS-wide capture. Releases outside the terminal may be lost. Preserve combined-flag handling and synthetic-click suppression; do not infer release from a stationary pointer timeout.
-- Gera owns legality and position state through `IChessGame`; retain the tested adapter corrections for draws and captured-rook rights. Stockfish is the planned opponent through UCI; an LLM is optional for personality/conversation and must not own legality or mutate the board directly.
+- Gera owns legality and position state through `IChessGame`; retain the tested adapter corrections for draws and captured-rook rights. Stockfish supplies opponent proposals through UCI; an LLM is optional for personality/conversation and must not own legality or mutate the board directly.
 - Typed UCI move input is requested for a later iteration, not implemented now. Preserve input-independent source/destination/promotion intents.
-- Stockfish, LLM integration, persistence, a web API, and extra panels/windows remain deferred. Planned milestones describe direction, not permission to implement them without a corresponding task.
+- Milestone 2 includes Stockfish subprocess play and versioned JSON game journals. Keep opponent and file I/O asynchronous, validate all proposed moves through Gera, and replay saves in isolation before replacing the live game. Stockfish is user-supplied, not bundled.
+- Opponent difficulty configuration, LLM integration, a web API, and extra panels/windows remain deferred. Planned milestones describe direction, not permission to implement them without a corresponding task.

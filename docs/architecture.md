@@ -1,6 +1,6 @@
 # Chess in the terminal — architecture
 
-Decision record for subsequent development sessions. Updated 2026-10-21.
+Decision record for subsequent development sessions. Updated 2026-10-23.
 
 ## Chosen direction and current state
 
@@ -8,7 +8,7 @@ Build a cross-platform C#/.NET chess application for Windows, Linux, and macOS, 
 
 The active solution targets `net10.0` and pins SharpConsoleUI `2.7.4` and Gera.Chess `1.2.0`. Its executable renders one board through `CanvasControl`, with original Unicode pieces, an ASCII fallback, smaller adaptive squares, legal-destination highlighting, drag preview, click-to-move, and keyboard controls. There is no piece-size toggle. Detailed controls and terminal notes are in the application README; the prototype README retains the original framework API investigation.
 
-**Milestone 1: legal local gameplay is implemented.** Two local players share the board, with enforced turns, legal moves, castling, en passant, explicit Q/R/B/N promotion, check, checkmate, stalemate, draw claims/agreement, resignation, and reset. Draw adjudication has the explicit dead-position limitation below. Stockfish, typed UCI move entry, LLM integration, persistence, and a web API are not integrated. Real-terminal validation across the target operating systems remains outstanding.
+**Milestones 1 and 2 are implemented.** Local players or a human and a local Stockfish subprocess share the legal board, with enforced turns, castling, en passant, explicit Q/R/B/N promotion, check, checkmate, stalemate, draw claims/agreement, resignation, and reset. Versioned JSON saves preserve accepted move/draw history and outcomes. Draw adjudication has the explicit dead-position limitation below. Typed UCI move entry, opponent difficulty settings, LLM integration, and a web API remain deferred. Real-terminal and real-Stockfish validation across the target operating systems remains outstanding.
 
 ## Chess rules and game state
 
@@ -37,18 +37,28 @@ User and opponent moves must pass through this same rules boundary. Drag preview
 
 ## Stockfish opponent
 
-Use **Stockfish as a separate process through the UCI protocol**. Process startup, protocol messages, executable resolution, search options, timeouts, cancellation, and shutdown belong in infrastructure. The application decides when the opponent should move and how to apply the result; domain and TUI code should not parse engine output or launch processes.
+**Stockfish runs as a separate local process through UCI.** `TerminalChess.Infrastructure/StockfishOpponent` owns startup, protocol messages, search limits, timeouts, cancellation, and shutdown. `Core/Application/GameSession` decides when the opponent moves and applies its proposal through `IChessGame`; domain and TUI code do not parse engine output or launch processes. The transport follows the [upstream UCI implementation](https://github.com/official-stockfish/Stockfish/blob/master/src/uci.cpp).
 
-The integration should:
+The implemented integration:
 
-- Search from a snapshot of the authoritative position and return a proposed move.
-- Validate that proposal through the rules library before committing it.
-- Associate each search with a game/position revision and discard results for positions superseded by reset, a new game, cancellation, or another accepted move.
-- Keep search and process I/O off the UI thread. Support cancellation and predictable process cleanup on exit.
-- Handle missing binaries, failed startup, invalid/no move results, and engine termination without corrupting the game state.
-- Allow platform-specific executable resolution without assuming a Windows path. Binary bundling versus user-supplied installation is undecided.
+- Captures an immutable snapshot plus the initial FEN and accepted move history, then returns a proposed move, including an explicit promotion when supplied.
+- Validates that proposal through Gera before committing it. Human input cannot play the engine's side, even after an engine failure.
+- Checks both the monotonic session revision and search identity before committing; reset, loading, cancellation, local fallback, and exit invalidate earlier searches, including already queued completions.
+- Runs startup/search/I/O on workers and dispatches the result through the pinned framework's inspected `ConsoleWindowSystem.InvokeAsync` API. Mutable game transitions stay on the UI thread.
+- Reports missing binaries, failed startup, invalid/no moves, deadline expiry, and unexpected exit without changing the position. Escape pauses a search; T retries; L switches the existing game to local two-player play. There is no automatic retry loop.
+- Uses a user-supplied executable selected by `--stockfish`, or `STOCKFISH_PATH`/`stockfish` on PATH for `--stockfish auto`. No engine binary is bundled or downloaded.
 
-Difficulty/search limits and personality-related engine settings are future application policy, not chess rules. Start with one engine opponent and a small, explicit configuration surface; do not add a framework of engine plugins in advance.
+One fresh process per turn deliberately isolates protocol output and cancellation. It performs `uci`/`uciok`, sets one thread and 16 MiB hash, sends `ucinewgame`/`isready`, supplies `position fen ... moves ...`, and searches with `go movetime 500`. Sending the full history lets Stockfish recognize repetitions. A 10.5-second total deadline bounds startup and search. Completion/failure/cancellation sends stop/quit with a 500 ms grace period, then kills an unresponsive process tree and awaits exit. Standard error is continuously drained without accumulating unbounded logs. This first integration favors simple lifecycle ownership over retaining engine hash between turns.
+
+The default remains two local players. In engine mode the human defaults to White; `--human black` makes Stockfish open. Stockfish declines draw offers by moving and does not make optional draw claims or negotiate agreement; automatic rule outcomes still apply. Search limits are fixed, leaving difficulty policy to milestone 3.
+
+Difficulty and personality-related settings remain future application policy, outside chess rules. `IChessOpponent` is the single small application capability; no engine-plugin framework is introduced.
+
+## JSON game persistence
+
+At the user's request, milestone 2 also includes explicit JSON saving/loading. `JsonGameStore` stores a version 1 document containing the initial FEN, engine side (null for local), and the ordered journal of accepted moves and draw/resignation actions. It does not persist the engine executable path, transient selection/promotion, in-flight searches, or credentials. The save is a journal rather than a final-FEN snapshot so repetition history, intended-move draw claims, draw offers, special moves, castling-right normalization, and outcomes can be reconstructed by the same rules adapter.
+
+F5 saves and F9 loads; `--load` resumes at startup. The default is `TerminalChess/game.json` in per-user .NET ApplicationData; `--save` chooses a path. There is no autosave. Mode and side come from the loaded game; executable selection comes from the current startup arguments/environment. Writes serialize to a temporary sibling and atomically replace the target only on success. Failed/cancelled writes preserve the previous file. File parsing and isolated replay run asynchronously, with a one-use prepared game transferred back to the UI owner only after validation. A changed live position during loading causes the load to be discarded. Malformed/unsupported JSON, invalid journals, and files over 4 MiB are rejected without replacing the live game. This is intentionally a small local file adapter, with no database or persistence framework.
 
 ## Optional LLM integration
 
@@ -65,14 +75,14 @@ Maintain a clean separation of responsibilities without creating projects solely
 | Boundary | Responsibility | Current implementation / intended growth |
 | --- | --- | --- |
 | Domain / application contracts | Chess values, move intents, immutable snapshots, outcomes, and `IChessGame` | `TerminalChess.Core/Domain` |
-| Application | Selection, drag/cursor state, promotion choice, move and draw commands | `TerminalChess.Core/Interaction`; add opponent orchestration when required |
+| Application | Serialized game ownership, opponent orchestration, replayable save contracts; selection, drag/cursor, promotion and input commands | `TerminalChess.Core/Application/GameSession` and `TerminalChess.Core/Interaction` |
 | TUI | Rendering, layout, focus, controls, glyphs, colors, and translation of framework events | `TerminalChess.Tui/ChessBoardControl` and startup composition in `Program` |
 | Rules adaptation | Single authoritative Gera position, cached legal moves, draw metadata, and package corrections | `TerminalChess.Rules/GeraGame` |
-| Future infrastructure | Stockfish process/UCI and optional LLM provider access | Deferred until the corresponding milestone is requested |
+| Infrastructure | Stockfish process/UCI and versioned JSON game files | `TerminalChess.Infrastructure`; optional LLM provider access remains deferred |
 
 `TerminalChess.Core` must remain free of UI-framework, rules-package, UCI transport, and LLM SDK types. The application depends on domain concepts and the small service contracts it actually needs. Adapters implement those contracts and depend inward. The executable composes the implementations and views. The rules-package adapter sits at the domain/application boundary; this does not create an alternate board or move generator.
 
-The core combines application-owned chess concepts and interaction code in one assembly, separated by folders/namespaces. Rules adaptation is a separate assembly because it owns the third-party dependency. The executable creates one `GeraGame` and injects it into interaction and rendering; input commands serialize transitions on the UI thread. Introduce further application/infrastructure components only as real dependencies require them.
+The core combines application-owned chess concepts, the session, and interaction code in one assembly, separated by folders/namespaces. Rules adaptation is a separate assembly because it owns the third-party dependency. Infrastructure depends only on Core and owns process/filesystem details. The executable composes `GameSession` around a `GeraGame`, and injects the session into interaction/rendering. Input and accepted opponent results serialize on the UI thread. A loaded journal is replayed into an isolated Gera instance, then ownership transfers to the session; it is not a second independently mutable live board. The application-owned `SavedGame`/`GameAction` records contain no JSON or filesystem APIs.
 
 Keep game transitions serialized under one application owner. Engine and LLM work should consume snapshots and return results that the application can accept or discard. Neither background work nor rendering may mutate a position independently.
 
@@ -98,18 +108,18 @@ These milestones record direction and acceptance goals. They do not authorize im
 | --- | --- | --- |
 | 0. Board interaction prototype | Implemented; real-terminal validation remains | Runnable SharpConsoleUI board, drag/drop, click/keyboard fallback, highlights, mapping/state tests, and documented terminal limitations |
 | 1. Legal local gameplay | Implemented in TerminalChess; real-terminal validation remains | Gera integration, enforced turns/legal moves, special moves, promotion choice, check/outcomes, draw policy with documented dead-position limitation, and rejection/position-consistency tests |
-| 2. Stockfish opponent | Planned after legal gameplay | UCI adapter, asynchronous searches, validated opponent moves, cancellation/stale-result protection, process cleanup, and useful engine-failure behavior |
+| 2. Stockfish opponent + JSON persistence | Implemented; real-engine/terminal validation remains | UCI adapter, asynchronous searches, validated opponent moves, cancellation/stale-result protection, process cleanup, engine-failure recovery, and versioned JSON game journals |
 | 3. Opponent configuration | Planned after engine play | Small, tested difficulty/search settings and personality hooks while preserving deterministic, valid game state |
 | 4. Optional LLM features | Planned after the rules/engine path works | Optional conversation/personality/commentary with provider failure fallback and no authority over game legality |
 | 5. Cross-platform hardening | Ongoing as features mature | Validate intended terminals on Windows/Linux/macOS; improve packaging, engine discovery, diagnostics, cleanup, and automated platform coverage |
 
-Persistence, a web API, extra UI panels, and additional application frontends remain outside the agreed scope. Typed UCI move entry is a requested future capability, explicitly excluded from the milestone 1 iteration.
+A web API, extra UI panels, and additional application frontends remain outside the agreed scope. Typed UCI move entry remains a requested future capability; internal UCI transport does not introduce a user-facing text input.
 
 ## Verification and continuity
 
 Use the root [AGENTS.md](../AGENTS.md) for active-solution commands and coding instructions. The existing tests cover coordinate mapping, interaction transitions, SharpConsoleUI input adaptation, rendering, and headless window routing. Extend them around actual behavior changes rather than duplicating implementation details.
 
-For the rules milestone, test legality, special moves, rejection without mutation, and outcome transitions. For engine work, test protocol handling and lifecycle behavior with controlled processes/fixtures, including cancellation and stale results. For LLM work, use deterministic test doubles and ensure failure does not prevent engine play; ordinary tests should not require network credentials or paid calls.
+Rules tests cover legality, special moves, rejection without mutation, and outcome transitions. Engine tests launch `tests/FakeUciEngine`, a small cross-platform .NET UCI fixture, to exercise protocol handling, history, promotion, stderr draining, startup/exit/deadline failures, cancellation, and process cleanup. Session tests control queued dispatch and late results to verify input gating, legal move adaptation, reset/load staleness, retries/local fallback, and disposal. JSON tests verify replayed repetition/draw/outcome history, promotion/opponent mode, invalid files, and preserving the previous save after cancellation. Ordinary tests require no installed Stockfish or network credentials. A real-engine smoke test and real-terminal checks remain separate. For later LLM work, use deterministic test doubles and ensure failure does not prevent engine play.
 
 Keep automated verification distinct from manual validation. Headless tests cannot establish mouse behavior or font appearance in a real emulator. Use the README checklist for drag/release outside the board and terminal, rapid clicks, resize, keyboard-only play, ASCII fallback, and terminal restoration on exit.
 
