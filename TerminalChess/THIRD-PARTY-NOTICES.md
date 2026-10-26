@@ -1,6 +1,25 @@
-# Rules integration third-party notices
+# TerminalChess third-party notices
 
 These notices cover Gera.Chess 1.2.0 and its Ardalis.SmartEnum 2.0.1 dependency. SharpConsoleUI and its transitive dependencies retain their own package licenses; this file is not a complete redistribution inventory for those UI packages.
+
+Release packages additionally retain resolved NuGet metadata and supplied license
+files under `licenses/`, shared license terms, and the .NET runtime's original
+license and third-party notices under `licenses/dotnet-runtime/`.
+
+## Bundled Stockfish 19
+
+Stockfish runs as a separate UCI process. Official unmodified Stockfish 19
+universal binaries are redistributed with their source tree, build scripts,
+documentation, authors, and full GPL v3 license in `stockfish/Copying.txt`.
+Only the executable filename is normalized to `stockfish.exe` or `stockfish`.
+The networks are embedded in the upstream executable; network filenames and
+retrieval instructions remain in the supplied sources and scripts.
+
+The exact official release, asset URL, archive SHA-256, original executable name,
+and executable SHA-256 are recorded in the package's `package.json`.
+`STOCKFISH-NOTICE.txt` provides source and license locations.
+
+Upstream release/source: https://github.com/official-stockfish/Stockfish/releases/tag/sf_19
 
 ## Gera.Chess 1.2.0
 

@@ -14,12 +14,13 @@ using SharpConsoleUI.Drivers;
 if (args.Contains("--help") || args.Contains("-h"))
 {
     Console.WriteLine("""
-        TerminalChess.Tui [--ascii] [--stockfish <executable>] [--human white|black]
+        TerminalChess [--ascii] [--local | --stockfish <executable>] [--human white|black]
                          [--save <file.json>] [--load]
-        Local two-player chess by default; --stockfish enables an engine opponent.
-        Stockfish executable: explicit path/name, STOCKFISH_PATH, or stockfish on PATH.
-        Use --stockfish auto to use STOCKFISH_PATH/PATH. Human defaults to White.
-        Search limit: 500 ms per move. Engine binary is user-supplied, not bundled.
+        Play bundled Stockfish by default; --local selects two local players.
+        Engine: explicit path, STOCKFISH_PATH, bundled stockfish folder, then PATH.
+        --stockfish auto uses automatic discovery. Human defaults to White.
+        Choose Beginner/Intermediate/Advanced/Expert on the centered startup screen.
+        Skill levels: 0/8/15/20; search times: 100/500/1500/3000 ms per move.
         Drag/click, or Arrows/WASD + Enter/Space. Promotion: Q/R/B/N or click.
         C claims a draw; F offers a draw before moving; Y/N answers; X resigns.
         Stockfish declines offers by moving; automatic draws still apply.
@@ -32,36 +33,10 @@ if (args.Contains("--help") || args.Contains("-h"))
     return 0;
 }
 
-var ascii = false;
-var load = false;
-string? engine = null;
-var human = PieceSide.White;
-var humanSpecified = false;
-var savePath = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TerminalChess", "game.json");
+StartupOptions options;
 try
 {
-    for (var i = 0; i < args.Length; i++)
-    {
-        switch (args[i])
-        {
-            case "--ascii": ascii = true; break;
-            case "--load": load = true; break;
-            case "--stockfish": engine = Value(); break;
-            case "--save": savePath = Value(); break;
-            case "--human":
-                humanSpecified = true;
-                human = Value() switch
-                {
-                    "white" => PieceSide.White, "black" => PieceSide.Black,
-                    _ => throw new ArgumentException("--human must be white or black.")
-                };
-                break;
-            default: throw new ArgumentException($"Unknown argument: {args[i]}");
-        }
-        string Value() => ++i < args.Length && !string.IsNullOrWhiteSpace(args[i]) && !args[i].StartsWith("--")
-            ? args[i] : throw new ArgumentException("Missing option value.");
-    }
-    if (humanSpecified && engine is null) throw new ArgumentException("--human requires --stockfish.");
+    options = StartupOptions.Parse(args);
 }
 catch (ArgumentException ex)
 {
@@ -73,8 +48,9 @@ SavedGame? saved = null;
 JsonGameStore store;
 try
 {
-    store = new JsonGameStore(savePath);
-    if (load) saved = await store.LoadAsync();
+    store = new JsonGameStore(options.SavePath ?? Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TerminalChess", "game.json"));
+    if (options.Load) saved = options.ConfigureLoadedGame(await store.LoadAsync());
 }
 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
 {
@@ -91,13 +67,12 @@ if (Console.IsInputRedirected || Console.IsOutputRedirected
 Console.OutputEncoding = Encoding.UTF8;
 var system = new ConsoleWindowSystem(new NetConsoleDriver(RenderMode.Buffer),
     options: new ConsoleWindowSystemOptions(ShowTopPanel: false, ShowBottomPanel: false));
-var configuredEngine = Environment.GetEnvironmentVariable("STOCKFISH_PATH");
-var executable = engine is not null and not "auto" ? engine
-    : !string.IsNullOrWhiteSpace(configuredEngine) ? configuredEngine : "stockfish";
+var executable = StockfishExecutable.Resolve(options.Stockfish);
 using var lifetime = new CancellationTokenSource();
 await using var session = new GameSession(new GeraGame(), new StockfishOpponent(executable),
     action => system.InvokeAsync(action), fen => new GeraGame(fen),
-    engine is null ? null : human == PieceSide.White ? PieceSide.Black : PieceSide.White);
+    options.EngineSide, saved?.Difficulty ?? OpponentDifficulty.Intermediate,
+    deferOpponent: (saved is null ? options.EngineSide : saved.EngineSide) is not null);
 try
 {
     if (saved is not null) session.Load(saved);
@@ -108,16 +83,13 @@ catch (Exception ex)
     return 1;
 }
 var interaction = new ChessBoardInteraction(session);
-using var board = new ChessBoardControl(interaction, ascii);
+using var board = new ChessBoardControl(interaction, options.Ascii);
 session.Changed += board.Refresh;
 var fileOperation = Task.CompletedTask;
 board.SaveRequested += () => BeginPersistence(false);
 board.LoadRequested += () => BeginPersistence(true);
-var window = new WindowBuilder(system).WithTitle("TerminalChess")
-    .Maximized().Frameless().Resizable(false).AddControl(board).Build();
-system.AddWindow(window);
-window.FocusManager.SetFocus(board, FocusReason.Programmatic);
-system.EnqueueOnUIThread(session.StartOpponent);
+using var selector = new DifficultySelectionControl(session.Difficulty);
+var window = GameWindow.Create(system, session, board, selector);
 try { return system.Run(); }
 finally
 {

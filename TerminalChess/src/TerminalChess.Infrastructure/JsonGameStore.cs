@@ -8,7 +8,8 @@ namespace TerminalChess.Infrastructure;
 public sealed class JsonGameStore(string path)
 {
     private sealed record StoredAction(GameActionKind Kind, string? Move);
-    private sealed record Document(int Version, string InitialFen, PieceSide? EngineSide, StoredAction[] Actions);
+    private sealed record Document(int Version, string InitialFen, PieceSide? EngineSide, StoredAction[] Actions,
+        OpponentDifficulty? Difficulty = null);
     private static readonly JsonSerializerOptions Options = new()
     {
         WriteIndented = true,
@@ -24,8 +25,8 @@ public sealed class JsonGameStore(string path)
         var temporary = System.IO.Path.Combine(directory, $".{System.IO.Path.GetFileName(Path)}.{Guid.NewGuid():N}.tmp");
         try
         {
-            var document = new Document(game.Version, game.InitialFen, game.EngineSide,
-                game.Actions.Select(a => new StoredAction(a.Kind, a.Move is { } move ? UciMove.Format(move) : null)).ToArray());
+            var document = new Document(2, game.InitialFen, game.EngineSide,
+                game.Actions.Select(a => new StoredAction(a.Kind, a.Move is { } move ? UciMove.Format(move) : null)).ToArray(), game.Difficulty);
             await using (var stream = new FileStream(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, true))
             {
                 await JsonSerializer.SerializeAsync(stream, document, Options, cancellationToken).ConfigureAwait(false);
@@ -44,11 +45,13 @@ public sealed class JsonGameStore(string path)
             await using var stream = new FileStream(Path, FileMode.Open, FileAccess.Read, FileShare.Read, 4096, true);
             if (stream.Length > 4 * 1024 * 1024) throw new InvalidDataException("Saved game is too large.");
             var document = await JsonSerializer.DeserializeAsync<Document>(stream, Options, cancellationToken).ConfigureAwait(false);
-            if (document is null || document.Version != 1 || string.IsNullOrWhiteSpace(document.InitialFen)
+            if (document is null || document.Version is not (1 or 2) || string.IsNullOrWhiteSpace(document.InitialFen)
+                || document.Version == 2 && document.Difficulty is null
                 || document.Actions is null || document.Actions.Any(a => a is null))
                 throw new InvalidDataException("Unsupported or incomplete saved game.");
             return new(document.Version, document.InitialFen, document.EngineSide,
-                document.Actions.Select(a => new GameAction(a.Kind, a.Move is null ? null : UciMove.Parse(a.Move))).ToArray());
+                document.Actions.Select(a => new GameAction(a.Kind, a.Move is null ? null : UciMove.Parse(a.Move))).ToArray(),
+                document.Difficulty ?? OpponentDifficulty.Intermediate);
         }
         catch (JsonException ex) { throw new InvalidDataException("Saved game is not valid TerminalChess JSON.", ex); }
     }

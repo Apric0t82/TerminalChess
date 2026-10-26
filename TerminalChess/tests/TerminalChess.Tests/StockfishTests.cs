@@ -37,7 +37,8 @@ public sealed class StockfishTests : IDisposable
         Assert.Equal(new MoveIntent(new(4, 1), new(4, 3)), moveResult);
         Assert.Equal(new[]
         {
-            "uci", "setoption name Threads value 1", "setoption name Hash value 16", "ucinewgame", "isready",
+            "uci", "setoption name Threads value 1", "setoption name Hash value 16",
+            "setoption name UCI_LimitStrength value false", "setoption name Skill Level value 8", "ucinewgame", "isready",
             $"position fen {fen} moves g1f3 g8f6", "go movetime 500", "stop", "quit"
         }, await File.ReadAllLinesAsync(log));
         AssertExited(log);
@@ -58,6 +59,26 @@ public sealed class StockfishTests : IDisposable
         var engine = Engine("promotion", out var log);
         var move = await engine.GetMoveAsync(Position(), default);
         Assert.Equal(new MoveIntent(new(0, 6), new(0, 7), PieceKind.Knight), move);
+        AssertExited(log);
+    }
+
+    [Theory]
+    [InlineData(OpponentDifficulty.Beginner, 0, 100)]
+    [InlineData(OpponentDifficulty.Intermediate, 8, 500)]
+    [InlineData(OpponentDifficulty.Advanced, 15, 1500)]
+    [InlineData(OpponentDifficulty.Expert, 20, 3000)]
+    public async Task SelectedDifficultySetsSkillAndSearchTimeBeforeSearching(OpponentDifficulty difficulty, int skill, int milliseconds)
+    {
+        var engine = Engine("normal", out var log);
+        var move = await engine.GetMoveAsync(Position() with { Difficulty = difficulty }, default);
+        Assert.Equal(new MoveIntent(new(4, 1), new(4, 3)), move);
+        var transcript = await File.ReadAllLinesAsync(log);
+        Assert.Contains("setoption name UCI_LimitStrength value false", transcript);
+        var skillIndex = Array.IndexOf(transcript, $"setoption name Skill Level value {skill}");
+        var readyIndex = Array.IndexOf(transcript, "isready");
+        var goIndex = Array.IndexOf(transcript, $"go movetime {milliseconds}");
+        Assert.True(skillIndex >= 0 && skillIndex < readyIndex);
+        Assert.True(readyIndex < goIndex);
         AssertExited(log);
     }
 

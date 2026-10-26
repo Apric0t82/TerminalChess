@@ -164,7 +164,7 @@ public sealed class ChessBoardControl : CanvasControl, IMouseAwareControl
         graphics.FillRect(0, 0, width, height, Background);
         var session = Interaction.Game as GameSession;
         graphics.WriteString(2, 0, session?.EngineSide is { } side
-            ? $"TERMINAL CHESS / Stockfish: {side}" : "TERMINAL CHESS / local game", Color.White, Background);
+            ? $"TERMINAL CHESS / Stockfish: {side} / {session.Difficulty}" : "TERMINAL CHESS / local game", Color.White, Background);
         if (width < 48 || height < 25)
         {
             _promotionPressed = null;

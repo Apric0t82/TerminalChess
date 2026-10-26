@@ -29,7 +29,7 @@ public sealed class PersistenceTests : IDisposable
         var store = Store();
         await store.SaveAsync(session.Export());
         var json = await File.ReadAllTextAsync(store.Path);
-        Assert.Contains("\"Version\": 1", json);
+        Assert.Contains("\"Version\": 2", json);
         Assert.Contains("\"Move\": \"g1f3\"", json);
         await using var restored = Session();
         restored.Load(await store.LoadAsync());
@@ -79,7 +79,7 @@ public sealed class PersistenceTests : IDisposable
     [InlineData("{")]
     [InlineData("null")]
     [InlineData("{}")]
-    [InlineData("{\"Version\":2,\"InitialFen\":\"start\",\"Actions\":[]}")]
+    [InlineData("{\"Version\":3,\"InitialFen\":\"start\",\"Actions\":[]}")]
     [InlineData("{\"Version\":1,\"InitialFen\":\"start\",\"Actions\":[null]}")]
     [InlineData("{\"Version\":1,\"InitialFen\":\"start\",\"Actions\":[],\"EngineSide\":\"Purple\"}")]
     public async Task MalformedOrUnsupportedJsonIsRejected(string json)
@@ -171,7 +171,7 @@ public sealed class PersistenceTests : IDisposable
         var before = session.Snapshot; var saved = session.Export();
         var invalid = new[]
         {
-            saved with { Version = 2 },
+            saved with { Version = 3 },
             saved with { EngineSide = (PieceSide)99 },
             saved with { Actions = [new((GameActionKind)99)] },
             saved with { Actions = [new(GameActionKind.DeclineDraw)] },
@@ -182,6 +182,53 @@ public sealed class PersistenceTests : IDisposable
             Assert.Throws<InvalidDataException>(() => session.Load(document));
             Assert.Same(before, session.Snapshot);
         }
+    }
+
+    [Theory]
+    [InlineData(OpponentDifficulty.Beginner)]
+    [InlineData(OpponentDifficulty.Intermediate)]
+    [InlineData(OpponentDifficulty.Advanced)]
+    [InlineData(OpponentDifficulty.Expert)]
+    public async Task DifficultyRoundTripsThroughJsonAndSession(OpponentDifficulty difficulty)
+    {
+        await using var session = Session();
+        session.ConfigureDifficulty(difficulty);
+        Play(session, "e2e4");
+        var store = Store(); await store.SaveAsync(session.Export());
+        var json = await File.ReadAllTextAsync(store.Path);
+        Assert.Contains($"\"Difficulty\": \"{difficulty}\"", json);
+        var saved = await store.LoadAsync();
+        await using var restored = Session(); restored.Load(saved);
+        Assert.Equal(difficulty, restored.Difficulty);
+        Assert.Equal(difficulty, restored.Export().Difficulty);
+        Assert.Equal(new Piece(PieceSide.White, PieceKind.Pawn), restored[new Square(4, 3)]);
+    }
+
+    [Fact]
+    public async Task VersionOneSaveWithoutDifficultyLoadsAsIntermediate()
+    {
+        var store = Store(); Directory.CreateDirectory(Path.GetDirectoryName(store.Path)!);
+        await File.WriteAllTextAsync(store.Path, """
+            {"Version":1,"InitialFen":"rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1",
+             "EngineSide":null,"Actions":[{"Kind":"Move","Move":"e2e4"}]}
+            """);
+        var saved = await store.LoadAsync();
+        Assert.Equal(OpponentDifficulty.Intermediate, saved.Difficulty);
+        await using var restored = Session(); restored.Load(saved);
+        Assert.Equal(OpponentDifficulty.Intermediate, restored.Difficulty);
+        Assert.Equal(new Piece(PieceSide.White, PieceKind.Pawn), restored[new Square(4, 3)]);
+        Assert.Equal(2, restored.Export().Version);
+    }
+
+    [Theory]
+    [InlineData("\"Impossible\"")]
+    [InlineData("42")]
+    [InlineData("null")]
+    public async Task InvalidVersionTwoDifficultyIsRejected(string difficulty)
+    {
+        var store = Store(); Directory.CreateDirectory(Path.GetDirectoryName(store.Path)!);
+        await File.WriteAllTextAsync(store.Path, "{\"Version\":2,\"InitialFen\":\"start\",\"Actions\":[],\"Difficulty\":" + difficulty + "}");
+        await Assert.ThrowsAsync<InvalidDataException>(() => store.LoadAsync());
     }
 
     public void Dispose() { if (Directory.Exists(_directory)) Directory.Delete(_directory, recursive: true); }

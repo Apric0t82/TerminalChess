@@ -10,26 +10,24 @@ public sealed class StockfishOpponent : IChessOpponent
 {
     private readonly string _executable;
     private readonly string[] _arguments;
-    private readonly int _moveTimeMs;
-    private readonly TimeSpan _timeout;
+    private readonly TimeSpan? _timeout;
 
-    public StockfishOpponent(string executable, int moveTimeMs = 500, TimeSpan? timeout = null,
+    public StockfishOpponent(string executable, TimeSpan? timeout = null,
         IEnumerable<string>? arguments = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(executable);
-        if (moveTimeMs is < 1 or > 60000) throw new ArgumentOutOfRangeException(nameof(moveTimeMs));
         _executable = executable;
         _arguments = arguments?.ToArray() ?? [];
-        _moveTimeMs = moveTimeMs;
-        _timeout = timeout ?? TimeSpan.FromSeconds(10) + TimeSpan.FromMilliseconds(moveTimeMs);
-        if (_timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
+        _timeout = timeout;
+        if (timeout <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(timeout));
     }
 
     public async Task<MoveIntent> GetMoveAsync(OpponentPosition position, CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
+        var strength = OpponentStrength.For(position.Difficulty);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        deadline.CancelAfter(_timeout);
+        deadline.CancelAfter(_timeout ?? TimeSpan.FromSeconds(10) + TimeSpan.FromMilliseconds(strength.MoveTimeMs));
         var token = deadline.Token;
         var start = new ProcessStartInfo(_executable)
         {
@@ -52,6 +50,8 @@ public sealed class StockfishOpponent : IChessOpponent
             await ReadUntilAsync(line => line == "uciok");
             await SendAsync("setoption name Threads value 1");
             await SendAsync("setoption name Hash value 16");
+            await SendAsync("setoption name UCI_LimitStrength value false");
+            await SendAsync($"setoption name Skill Level value {strength.SkillLevel}");
             await SendAsync("ucinewgame");
             await SendAsync("isready");
             await ReadUntilAsync(line => line == "readyok");
@@ -60,7 +60,7 @@ public sealed class StockfishOpponent : IChessOpponent
             // Sending the complete move history allows Stockfish to recognize repetition.
             var history = position.Moves.Count == 0 ? "" : " moves " + string.Join(' ', position.Moves.Select(UciMove.Format));
             await SendAsync($"position fen {position.InitialFen}{history}");
-            await SendAsync($"go movetime {_moveTimeMs}");
+            await SendAsync($"go movetime {strength.MoveTimeMs}");
             var best = await ReadUntilAsync(line => line.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() == "bestmove");
             var fields = best.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             return UciMove.Parse(fields.Length >= 2 ? fields[1] : "");

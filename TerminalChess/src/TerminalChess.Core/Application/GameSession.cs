@@ -2,7 +2,8 @@ using TerminalChess.Core.Domain;
 
 namespace TerminalChess.Core.Application;
 
-public sealed record OpponentPosition(PositionSnapshot Snapshot, string InitialFen, IReadOnlyList<MoveIntent> Moves);
+public sealed record OpponentPosition(PositionSnapshot Snapshot, string InitialFen, IReadOnlyList<MoveIntent> Moves,
+    OpponentDifficulty Difficulty = OpponentDifficulty.Intermediate);
 
 public interface IChessOpponent
 {
@@ -11,7 +12,8 @@ public interface IChessOpponent
 
 public enum GameActionKind { Move, ClaimDraw, OfferDraw, AcceptDraw, DeclineDraw, Resign }
 public sealed record GameAction(GameActionKind Kind, MoveIntent? Move = null);
-public sealed record SavedGame(int Version, string InitialFen, PieceSide? EngineSide, IReadOnlyList<GameAction> Actions);
+public sealed record SavedGame(int Version, string InitialFen, PieceSide? EngineSide, IReadOnlyList<GameAction> Actions,
+    OpponentDifficulty Difficulty = OpponentDifficulty.Intermediate);
 
 /// <summary>
 /// Serializes human and opponent transitions on the caller's UI thread. Background work
@@ -29,9 +31,11 @@ public sealed class GameSession : IChessGame, IAsyncDisposable
     private string _initialFen;
     private long _revision;
     private bool _disposed;
+    private bool _opponentReady;
 
     public GameSession(IChessGame game, IChessOpponent opponent, Func<Action, Task> dispatch,
-        Func<string, IChessGame> restorePosition, PieceSide? engineSide = null)
+        Func<string, IChessGame> restorePosition, PieceSide? engineSide = null,
+        OpponentDifficulty difficulty = OpponentDifficulty.Intermediate, bool deferOpponent = false)
     {
         _game = game;
         _opponent = opponent;
@@ -39,11 +43,15 @@ public sealed class GameSession : IChessGame, IAsyncDisposable
         _restorePosition = restorePosition;
         _initialFen = game.Snapshot.Fen;
         EngineSide = engineSide;
+        _ = OpponentStrength.For(difficulty);
+        Difficulty = difficulty;
+        _opponentReady = !deferOpponent;
         Snapshot = game.Snapshot with { Revision = ++_revision };
     }
 
     public event Action? Changed;
     public PieceSide? EngineSide { get; private set; }
+    public OpponentDifficulty Difficulty { get; private set; }
     public bool IsHumanTurn => EngineSide != Turn;
     public bool IsThinking => _search is not null;
     public string Status { get; private set; } = "";
@@ -104,7 +112,18 @@ public sealed class GameSession : IChessGame, IAsyncDisposable
         StartOpponent();
     }
 
-    public SavedGame Export() => new(1, _initialFen, EngineSide, Array.AsReadOnly(_actions.ToArray()));
+    public SavedGame Export() => new(2, _initialFen, EngineSide, Array.AsReadOnly(_actions.ToArray()), Difficulty);
+
+    public void ConfigureDifficulty(OpponentDifficulty difficulty)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        _ = OpponentStrength.For(difficulty);
+        CancelOpponent();
+        Difficulty = difficulty;
+        _opponentReady = true;
+        Publish();
+        StartOpponent();
+    }
 
     public sealed class PreparedGame
     {
@@ -119,7 +138,8 @@ public sealed class GameSession : IChessGame, IAsyncDisposable
     public PreparedGame PrepareLoad(SavedGame saved, CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        if (saved.Version != 1 || string.IsNullOrWhiteSpace(saved.InitialFen) || saved.Actions is null
+        if (saved.Version is not (1 or 2) || !Enum.IsDefined(saved.Difficulty)
+            || string.IsNullOrWhiteSpace(saved.InitialFen) || saved.Actions is null
             || saved.EngineSide is { } side && !Enum.IsDefined(side))
             throw new InvalidDataException("Unsupported or invalid saved game.");
         saved = saved with { Actions = Array.AsReadOnly(saved.Actions.ToArray()) };
@@ -146,6 +166,7 @@ public sealed class GameSession : IChessGame, IAsyncDisposable
         _game = restored;
         _initialFen = saved.InitialFen;
         EngineSide = saved.EngineSide;
+        Difficulty = saved.Difficulty;
         _actions.Clear();
         _actions.AddRange(saved.Actions);
         Publish();
@@ -191,11 +212,11 @@ public sealed class GameSession : IChessGame, IAsyncDisposable
 
     public void StartOpponent()
     {
-        if (_disposed || IsHumanTurn || Outcome is not null || IsThinking) return;
+        if (_disposed || !_opponentReady || IsHumanTurn || Outcome is not null || IsThinking) return;
         var search = new CancellationTokenSource();
         _search = search;
         var position = new OpponentPosition(Snapshot, _initialFen,
-            Array.AsReadOnly(_actions.Where(a => a.Kind == GameActionKind.Move).Select(a => a.Move!.Value).ToArray()));
+            Array.AsReadOnly(_actions.Where(a => a.Kind == GameActionKind.Move).Select(a => a.Move!.Value).ToArray()), Difficulty);
         Status = "Stockfish thinking... Esc: pause";
         Changed?.Invoke();
         _searches.RemoveAll(task => task.IsCompleted);

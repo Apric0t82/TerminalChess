@@ -258,10 +258,11 @@ public sealed class GameSessionTests
         await using var session = Session(opponent, dispatcher);
         session.TryMove(Move("e2e4"));
         var original = await opponent.Next(); var oldSearch = session.ActiveSearch;
-        var saved = session.Export();
+        var saved = session.Export() with { Difficulty = OpponentDifficulty.Expert };
         session.Load(saved);
         Assert.True(original.Token.IsCancellationRequested);
         var resumed = await opponent.Next();
+        Assert.Equal(OpponentDifficulty.Expert, resumed.Position.Difficulty);
         Assert.Equal(new[] { Move("e2e4") }, resumed.Position.Moves);
         Assert.Equal(saved.InitialFen, resumed.Position.InitialFen);
         Assert.True(resumed.Position.Snapshot.Revision > original.Position.Snapshot.Revision);
@@ -290,5 +291,44 @@ public sealed class GameSessionTests
         Assert.Null(session.Outcome);
         Assert.Equal(5, session.Export().Actions.Count);
         Assert.Equal(GameActionKind.OfferDraw, session.Export().Actions[2].Kind);
+    }
+
+    [Fact]
+    public async Task DifficultyChangeCancelsOldSearchAndNewRequestCarriesChosenLevel()
+    {
+        var opponent = new Opponent(); var dispatcher = new Dispatcher();
+        await using var session = Session(opponent, dispatcher);
+        session.TryMove(Move("e2e4"));
+        var first = await opponent.Next(); var firstTask = session.ActiveSearch;
+        session.ConfigureDifficulty(OpponentDifficulty.Beginner);
+        Assert.True(first.Token.IsCancellationRequested);
+        var next = await opponent.Next();
+        Assert.Equal(OpponentDifficulty.Beginner, next.Position.Difficulty);
+        first.Reply.SetResult(Move("e7e5")); await firstTask;
+        next.Reply.SetResult(Move("c7c5"));
+        (await dispatcher.Next())(); await session.ActiveSearch;
+        Assert.Null(session[new Square(4, 4)]);
+        Assert.Equal(new Piece(PieceSide.Black, PieceKind.Pawn), session[new Square(2, 4)]);
+        Assert.Equal(OpponentDifficulty.Beginner, session.Export().Difficulty);
+        session.Reset();
+        Assert.Equal(OpponentDifficulty.Beginner, session.Difficulty);
+    }
+
+    [Fact]
+    public async Task LoadingBeforeDifficultyConfirmationCannotStartEngine()
+    {
+        var opponent = new Opponent(); var dispatcher = new Dispatcher();
+        await using var session = new GameSession(new GeraGame(), opponent, dispatcher.Dispatch,
+            fen => new GeraGame(fen), PieceSide.White, deferOpponent: true);
+        session.Load(session.Export() with { Difficulty = OpponentDifficulty.Expert });
+        session.StartOpponent();
+        Assert.False(session.IsThinking);
+        Assert.False(opponent.Requests.Reader.TryRead(out _));
+        session.ConfigureDifficulty(OpponentDifficulty.Advanced);
+        var request = await opponent.Next();
+        Assert.Equal(OpponentDifficulty.Advanced, request.Position.Difficulty);
+        request.Reply.SetResult(Move("e2e4"));
+        (await dispatcher.Next())(); await session.ActiveSearch;
+        Assert.Equal(PieceSide.Black, session.Turn);
     }
 }

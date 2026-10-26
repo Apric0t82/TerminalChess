@@ -5,8 +5,44 @@ Local two-player or Stockfish opponent chess in a cross-platform terminal, using
 turns/moves, castling, en passant, explicit promotion choice, check, checkmate,
 stalemate, draw adjudication, resignation, and a new-game command. Milestone 2
 adds asynchronous local Stockfish play and versioned JSON saving/loading.
+Milestone 3 adds a startup opponent-level selector and persistent strength presets.
 
-## Build and run
+## Downloaded release: start and play
+
+Extract the complete package for your OS/architecture, then launch
+`TerminalChess.exe` on Windows or `./TerminalChess` on Linux/macOS in an ANSI
+terminal. **No .NET or Stockfish installation is needed.** Keep the `stockfish`
+folder beside the game executable. The package includes the .NET runtime and
+Stockfish 19; playing makes no network requests or downloads.
+
+The human plays White against Stockfish by default. Use `--human black` to let
+Stockfish open, `--local` for two local players, or `--help` for controls. An
+interactive terminal of at least **48 columns × 25 rows** is required.
+
+The first screen is a centered selector on a black background, with a cyan title,
+gold selection, and the selected engine settings below the four level descriptions.
+Use Up/Down (or W/S), then Enter/Space to start. Mouse users can select a level
+and click **Start game**. Intermediate is initially selected for a new game;
+startup `--load` highlights that save's difficulty. No engine search begins before
+confirmation, including when the human plays Black. `--local` skips the selector.
+
+| Level | Description | Stockfish Skill Level | Search time per move |
+| --- | --- | --- | --- |
+| Beginner | Forgiving opponent, shallow tactics | 0 | 100 ms |
+| Intermediate | Reasonable tactics, occasional mistakes | 8 | 500 ms |
+| Advanced | Strong positional and tactical play | 15 | 1500 ms |
+| Expert | Full-strength Stockfish | 20 | 3000 ms |
+
+Expert applies no artificial weakening (`Skill Level 20`, `UCI_LimitStrength false`)
+within its three-second search budget. These are skill/time presets, not Elo ratings.
+The chosen level applies to each fresh engine process, survives R/new game, and is
+saved with the game. F9 restores a save's difficulty without another startup screen.
+
+The game is a self-contained single-file executable; Stockfish remains a
+separate executable in the bundled folder, communicating through UCI. Preserve
+the included sources, GPL license, notices, and `package.json` when redistributing.
+
+## Build and run from source
 
 From the repository root, with the .NET 10 SDK/runtime installed:
 
@@ -22,10 +58,49 @@ interactive ANSI terminal of at least **48 columns × 25 rows** is required.
 Redirected input/output and `TERM=dumb` are rejected. The solution's local
 `NuGet.Config` explicitly uses nuget.org.
 
+Source builds do not download an engine. Use `-- --local` for two-player play,
+or provide/discover an engine as described below. The release packaging command
+performs the engine download during the build.
+
+## Publish self-contained release packages
+
+From the repository root, with PowerShell 7.2+ and the .NET 10 SDK:
+
+```powershell
+pwsh -NoProfile -File TerminalChess/packaging/Publish-Release.ps1 -RuntimeIdentifier win-x64
+```
+
+Supported targets: `win-x64`, `win-arm64`, `linux-x64`, `linux-arm64`, `osx-x64`,
+and `osx-arm64`. The default target is the host runtime identifier. The script
+uses `Properties/PublishProfiles/Bundled.pubxml`, publishes Release without
+trimming, and downloads a pinned official Stockfish 19 universal archive.
+`packaging/stockfish.json` records each asset name and SHA-256 from its official
+release metadata. Cached downloads are rechecked on every build; a checksum
+mismatch stops packaging before extraction. Ordinary builds/tests never download Stockfish.
+
+Packages and SHA-256 sidecars are written to
+`artifacts/packages/TerminalChess-<rid>.zip` for Windows or `.tar.gz` for Unix.
+The unpacked build lives under `artifacts/publish/<rid>/<build-id>/`. All engine
+downloads/build outputs are ignored by Git. Official sources, build scripts,
+documentation, GPL license, authors, embedded NNUE networks, and a provenance
+notice travel with the engine; only its executable filename is normalized.
+The package also retains .NET runtime notices, NuGet dependency metadata, and
+license files supplied by those packages under `licenses/`.
+
+Publishing for the host platform automatically runs `packaging/Test-Release.ps1`:
+it verifies package files and the engine checksum, launches the game help from
+an unrelated working directory with .NET lookup disabled, and runs a real UCI
+handshake/search/shutdown. Cross-published packages need this smoke check on
+their target OS/architecture. Unix packages should be built on Linux/macOS to
+preserve executable permissions; the script uses tar for Unix archives.
+The bundled game can extract native runtime libraries to the standard .NET
+bundle cache on first launch. OS libraries required by .NET still apply.
+
 ## Stockfish opponent
 
-Install a Stockfish executable suitable for your OS and CPU from the
-[official project](https://stockfishchess.org/download/), then pass its path:
+Release packages discover the bundled engine automatically. To override it, or
+to run a source checkout without a bundle, use a Stockfish executable from the
+[official project](https://stockfishchess.org/download/) and pass its path:
 
 ```sh
 dotnet run --project TerminalChess/src/TerminalChess.Tui -c Release --no-build --no-restore -- --stockfish "/path/to/stockfish"
@@ -33,21 +108,24 @@ dotnet run --project TerminalChess/src/TerminalChess.Tui -c Release --no-build -
 
 On Windows the executable can be a quoted path such as
 `"C:\Tools\Stockfish\stockfish.exe"`. On Linux/macOS ensure it has executable
-permissions. The app invokes the executable directly without a shell. It does
-not download or bundle Stockfish. Keep any files required by your engine
-distribution alongside its executable.
+permissions. The app invokes the executable directly without a shell. Keep any
+files required by a custom engine distribution alongside its executable.
 
-Use `--stockfish auto` to resolve `STOCKFISH_PATH`, falling back to `stockfish`
-on `PATH`. A supplied path/name takes precedence. Without `--stockfish`, play
-remains local two-player. The human plays White by default; append
+Automatic discovery (also selected by `--stockfish auto`) checks `STOCKFISH_PATH`,
+then `stockfish/stockfish.exe` on Windows or `stockfish/stockfish` on Unix **beside
+the game executable**, then `stockfish` on PATH. A supplied path/name takes
+precedence. Launching from another working directory still finds the bundle.
+Use `--local` to disable engine play. The human plays White by default; append
 `--human black` to let Stockfish open as White. The board keeps White at the
-bottom. Search time is fixed at 500 ms, with one engine thread and 16 MiB of
-hash; difficulty configuration remains a later milestone.
+bottom. Skill and search time follow the chosen level, with one engine thread
+and 16 MiB of hash.
 
 Each turn launches a fresh local UCI subprocess, completes `uci`/`isready`,
-sends the initial FEN and accepted move history, and requests `go movetime 500`.
+sends the selected `Skill Level`, disables Elo limiting, supplies the initial FEN
+and accepted move history, and requests `go movetime` with the selected time.
 This keeps engine repetition history and isolates searches. Startup, I/O, and
-search run off the UI thread. The total engine deadline is 10.5 seconds, followed
+search run off the UI thread. The total engine deadline is the search time plus
+10 seconds for startup/protocol overhead, followed
 by at most 500 ms of cooperative shutdown before killing an unresponsive process
 tree. No engine output is written over the TUI.
 
@@ -72,13 +150,16 @@ dotnet run --project TerminalChess/src/TerminalChess.Tui -c Release --no-build -
 ```
 
 Saving is explicit; quitting and restarting do not automatically save. The
-version 1 JSON contains the initial FEN, opponent side (or local mode), and an
+version 2 JSON contains the initial FEN, opponent side (or local mode), difficulty, and an
 ordered journal of accepted moves and draw/resignation actions. Replay restores
 repetition, halfmove counts, draw offers, promotions, castling-right corrections,
 and outcomes. Pending selection/drag/promotion and in-flight engine searches are
-not saved. Loading an engine turn starts a fresh search. Loaded opponent mode
-and side take precedence over startup mode/side flags; the executable still
-comes from `--stockfish`, `STOCKFISH_PATH`, or `PATH` and is not stored in the save.
+not saved. Loading an engine turn starts a fresh search. Startup `--load`
+preserves the saved mode/side unless `--local` or `--human` explicitly overrides
+it. F9 restores the saved mode/side. The executable still comes from automatic
+discovery or `--stockfish` and is not stored in the save.
+Existing version 1 saves without a difficulty still load and default to Intermediate;
+the next save upgrades them to version 2.
 
 Writes use a temporary sibling file followed by atomic replacement. JSON parsing
 and isolated rules replay run asynchronously; a valid replay is transferred to
