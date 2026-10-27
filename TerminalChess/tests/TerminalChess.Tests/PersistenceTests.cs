@@ -21,6 +21,51 @@ public sealed class PersistenceTests : IDisposable
     private JsonGameStore Store() => new(Path.Combine(_directory, "games", "saved game.json"));
 
     [Fact]
+    public async Task TimestampedSavesPreserveBothGamesEvenInTheSameSecond()
+    {
+        var library = new GameSaveLibrary(_directory);
+        Assert.Empty(library.List());
+        await using var session = Session();
+        Play(session, "e2e4");
+        var time = new DateTime(2026, 10, 15, 13, 7, 42);
+        var first = await library.SaveAsync(session.Export(), time);
+        session.Reset();
+        Play(session, "d2d4");
+        var second = await library.SaveAsync(session.Export(), time);
+        Assert.Equal("game_10152026_130742.json", Path.GetFileName(first.Path));
+        Assert.Equal("game_10152026_130743.json", Path.GetFileName(second.Path));
+        Assert.Equal("15 October 2026, 13:07:42", first.Name);
+        Assert.Equal(new[] { second, first }, library.List());
+        Assert.Equal(UciMove.Parse("e2e4"), (await new JsonGameStore(first.Path).LoadAsync()).Actions.Single().Move);
+        Assert.Equal(UciMove.Parse("d2d4"), (await new JsonGameStore(second.Path).LoadAsync()).Actions.Single().Move);
+    }
+
+    [Fact]
+    public void LoadListConfirmsSelectedGameAndEscapeCancelsEmptyList()
+    {
+        var entries = new[] { new GameSaveEntry("first.json", new(2026, 10, 15)), new GameSaveEntry("second.json", new(2026, 10, 14)) };
+        using var list = new TerminalChess.Tui.GameLoadControl(entries);
+        var buffer = new SharpConsoleUI.Layout.CharacterBuffer(48, 25);
+        var bounds = new SharpConsoleUI.Layout.LayoutRect(0, 0, 48, 25);
+        list.PaintDOM(buffer, bounds, bounds, SharpConsoleUI.Color.White, SharpConsoleUI.Color.Black);
+        var row = string.Concat(Enumerable.Range(0, 48).Select(x => buffer.GetCell(x, 3).Character.ToString()));
+        Assert.Contains("> 15 October 2026, 00:00:00", row);
+        GameSaveEntry? selected = null;
+        list.Selected += entry => selected = entry;
+        list.HandleKey(new('\0', ConsoleKey.DownArrow, false, false, false));
+        Assert.Null(selected);
+        list.HandleKey(new('\0', ConsoleKey.Enter, false, false, false));
+        Assert.Equal(entries[1], selected);
+        using var empty = new TerminalChess.Tui.GameLoadControl([]);
+        var cancelled = false;
+        empty.Selected += _ => Assert.Fail("Empty list cannot load a game.");
+        empty.Cancelled += () => cancelled = true;
+        empty.HandleKey(new('\0', ConsoleKey.Enter, false, false, false));
+        empty.HandleKey(new('\0', ConsoleKey.Escape, false, false, false));
+        Assert.True(cancelled);
+    }
+
+    [Fact]
     public async Task JsonRoundTripPreservesRepetitionAndClaimedOutcome()
     {
         await using var session = Session();

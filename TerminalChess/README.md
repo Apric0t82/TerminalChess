@@ -139,15 +139,17 @@ show an error. **T** retries the engine turn; **L** continues with two local pla
 
 ## JSON persistence
 
-**F5** saves the current committed game; **F9** loads it. The default file is
-`TerminalChess/game.json` under .NET's per-user `ApplicationData` directory
-(for example `%APPDATA%` on Windows). Use `--save` to choose a file explicitly
-on any platform:
+**F5** creates a new save without overwriting earlier saves. Files are named
+`game_MMDDYYYY_HHMMSS.json` under .NET's per-user `ApplicationData/TerminalChess`
+directory (for example `%APPDATA%/TerminalChess` on Windows). If the timestamp
+is already used, the next available second is used.
 
-```sh
-dotnet run --project TerminalChess/src/TerminalChess.Tui -c Release --no-build --no-restore -- --stockfish auto --save ./game.json
-dotnet run --project TerminalChess/src/TerminalChess.Tui -c Release --no-build --no-restore -- --load --save ./game.json
-```
+**F9** opens the saved-game list, newest first. Use Up/Down to select a game and
+Enter to load it; Escape returns without loading. Labels use English month names,
+for example `15 October 2026, 13:07:42`. An existing legacy `game.json` also appears.
+`--load` opens this list at startup. `--save <file.json>` chooses the directory
+containing that path for new timestamped saves; combined with `--load`, it loads
+that exact file at startup for compatibility.
 
 Saving is explicit; quitting and restarting do not automatically save. The
 version 2 JSON contains the initial FEN, opponent side (or local mode), difficulty, and an

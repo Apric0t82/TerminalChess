@@ -16,6 +16,55 @@ namespace TerminalChess.Tests;
 
 public sealed class DifficultySelectionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task LoadListEnterRestoresRenderedBoardAndKeyboardInput(bool fromStartup)
+    {
+        using var driver = new HeadlessConsoleDriver(80, 25);
+        var system = new ConsoleWindowSystem(driver, options: new ConsoleWindowSystemOptions(
+            ShowTopPanel: false, ShowBottomPanel: false, EnableAnimations: false)) { BlockWhenIdle = false };
+        await using var game = new GameSession(new GeraGame(), new WaitingOpponent(), a => system.InvokeAsync(a),
+            fen => new GeraGame(fen), fromStartup ? PieceSide.Black : null, deferOpponent: true);
+        using var board = new ChessBoardControl(new ChessBoardInteraction(game), ascii: true);
+        using var selector = new DifficultySelectionControl();
+        var window = GameWindow.Create(system, game, board, selector);
+        using var hosted = system.BeginHosted(); hosted.Tick();
+        var entry = new TerminalChess.Infrastructure.GameSaveEntry("game.json", new(2026, 10, 15));
+        // Reopening covers accidental disposal when entering and leaving the list repeatedly.
+        for (var i = 0; i < 2; i++)
+        {
+            var list = new GameLoadControl([entry]);
+            var loaded = false;
+            GameWindow.ShowLoadList(window, board, selector, list, chosen =>
+            {
+                Assert.Equal(entry, chosen);
+                game.Load(game.Export() with { EngineSide = null });
+                loaded = true;
+            });
+            hosted.Tick();
+            Assert.True(list.HasFocus);
+            driver.SimulateKeyPress(new('\0', ConsoleKey.Enter, false, false, false)); hosted.Tick();
+            Assert.True(loaded);
+            Assert.True(board.Visible);
+            Assert.True(board.HasFocus);
+            Assert.False(window.ContainsControl(list));
+            var buffer = new CharacterBuffer(80, 25);
+            var bounds = new LayoutRect(0, 0, 80, 25);
+            board.PaintDOM(buffer, bounds, bounds, Color.White, Color.Black);
+            Assert.Contains("TERMINAL CHESS / local game", Row(buffer, 0, 80));
+            var before = board.AsciiPieces;
+            driver.SimulateKeyPress(new('u', ConsoleKey.U, false, false, false)); hosted.Tick();
+            Assert.NotEqual(before, board.AsciiPieces);
+        }
+        var cancelList = new GameLoadControl([]);
+        GameWindow.ShowLoadList(window, board, selector, cancelList, _ => Assert.Fail("Unexpected load."));
+        hosted.Tick();
+        driver.SimulateKeyPress(new('\0', ConsoleKey.Escape, false, false, false)); hosted.Tick();
+        Assert.True(board.Visible);
+        Assert.True(board.HasFocus);
+    }
+
     private static CharacterBuffer Render(DifficultySelectionControl selector, int width = 80, int height = 25)
     {
         var buffer = new CharacterBuffer(width, height);

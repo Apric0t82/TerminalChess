@@ -7,6 +7,35 @@ namespace TerminalChess.Tui;
 
 public static class GameWindow
 {
+    public static void ShowLoadList(Window window, ChessBoardControl board,
+        DifficultySelectionControl selector, GameLoadControl list, Action<TerminalChess.Infrastructure.GameSaveEntry> load)
+    {
+        IWindowControl previous = window.ContainsControl(selector) && selector.Visible ? selector : board;
+        // RemoveContent disposes controls in SharpConsoleUI 2.7.4. Keep reusable views alive.
+        previous.Visible = false;
+        window.AddControl(list);
+        window.FocusManager.SetFocus(list, FocusReason.Programmatic);
+        var closed = false;
+        void Close(bool selected)
+        {
+            if (closed) return;
+            closed = true;
+            window.RemoveContent(list);
+            IWindowControl target = selected ? board : previous;
+            if (!window.ContainsControl(target)) window.AddControl(target);
+            target.Visible = true;
+            window.FocusManager.SetFocus((IFocusableControl)target, FocusReason.Programmatic);
+            if (target == board) board.Refresh();
+        }
+        list.Cancelled += () => Close(false);
+        list.Selected += entry =>
+        {
+            if (closed) return;
+            Close(true);
+            load(entry);
+        };
+    }
+
     public static Window Create(ConsoleWindowSystem system, GameSession session,
         ChessBoardControl board, DifficultySelectionControl selector)
     {

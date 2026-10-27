@@ -18,7 +18,7 @@ public sealed class JsonGameStore(string path)
     };
     public string Path { get; } = System.IO.Path.GetFullPath(path);
 
-    public async Task SaveAsync(SavedGame game, CancellationToken cancellationToken = default)
+    public async Task SaveAsync(SavedGame game, CancellationToken cancellationToken = default, bool overwrite = true)
     {
         var directory = System.IO.Path.GetDirectoryName(Path)!;
         Directory.CreateDirectory(directory);
@@ -33,7 +33,7 @@ public sealed class JsonGameStore(string path)
                 await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
             }
             cancellationToken.ThrowIfCancellationRequested();
-            File.Move(temporary, Path, overwrite: true);
+            File.Move(temporary, Path, overwrite);
         }
         finally { if (File.Exists(temporary)) File.Delete(temporary); }
     }

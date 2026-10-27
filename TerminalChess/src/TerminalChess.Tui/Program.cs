@@ -15,7 +15,7 @@ if (args.Contains("--help") || args.Contains("-h"))
 {
     Console.WriteLine("""
         TerminalChess [--ascii] [--local | --stockfish <executable>] [--human white|black]
-                         [--save <file.json>] [--load]
+                         [--save <file.json>] [--load] (save directory; exact startup load path)
         Play bundled Stockfish by default; --local selects two local players.
         Engine: explicit path, STOCKFISH_PATH, bundled stockfish folder, then PATH.
         --stockfish auto uses automatic discovery. Human defaults to White.
@@ -25,8 +25,8 @@ if (args.Contains("--help") || args.Contains("-h"))
         C claims a draw; F offers a draw before moving; Y/N answers; X resigns.
         Stockfish declines offers by moving; automatic draws still apply.
         Esc cancels selection or pauses engine; T retries; L switches to local play.
-        F5 saves JSON; F9 loads it. --load resumes the save at startup.
-        Default save: application data / TerminalChess / game.json. No automatic save.
+        F5 creates a save; F9 opens the game list. --load opens it at startup.
+        Saves: application data / TerminalChess / game_MMDDYYYY_HHMMSS.json.
         R starts a new game; U toggles ASCII; Ctrl+Q quits. No typed UCI move input.
         Use an interactive ANSI terminal of at least 48 columns x 25 rows.
         """);
@@ -46,11 +46,13 @@ catch (ArgumentException ex)
 
 SavedGame? saved = null;
 JsonGameStore store;
+GameSaveLibrary library;
 try
 {
     store = new JsonGameStore(options.SavePath ?? Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TerminalChess", "game.json"));
-    if (options.Load) saved = options.ConfigureLoadedGame(await store.LoadAsync());
+    library = new GameSaveLibrary(Path.GetDirectoryName(store.Path)!);
+    if (options.Load && options.SavePath is not null) saved = options.ConfigureLoadedGame(await store.LoadAsync());
 }
 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
 {
@@ -87,9 +89,10 @@ using var board = new ChessBoardControl(interaction, options.Ascii);
 session.Changed += board.Refresh;
 var fileOperation = Task.CompletedTask;
 board.SaveRequested += () => BeginPersistence(false);
-board.LoadRequested += () => BeginPersistence(true);
 using var selector = new DifficultySelectionControl(session.Difficulty);
 var window = GameWindow.Create(system, session, board, selector);
+board.LoadRequested += OpenGameList;
+if (options.Load && options.SavePath is null) system.EnqueueOnUIThread(OpenGameList);
 try { return system.Run(); }
 finally
 {
@@ -99,7 +102,29 @@ finally
     await fileOperation;
 }
 
-void BeginPersistence(bool loading)
+void OpenGameList()
+{
+    if (!fileOperation.IsCompleted) return;
+    fileOperation = OpenAsync();
+    async Task OpenAsync()
+    {
+        try
+        {
+            var entries = await Task.Run(library.List, lifetime.Token);
+            await system.InvokeAsync(() =>
+            {
+                if (lifetime.IsCancellationRequested) return;
+                var list = new GameLoadControl(entries);
+                GameWindow.ShowLoadList(window, board, selector, list,
+                    entry => BeginPersistence(true, entry.Path));
+            }).WaitAsync(lifetime.Token);
+        }
+        catch (OperationCanceledException) when (lifetime.IsCancellationRequested) { }
+        catch (Exception ex) { await NoticeAsync($"Load failed: {ex.Message}"); }
+    }
+}
+
+void BeginPersistence(bool loading, string? loadPath = null)
 {
     if (!fileOperation.IsCompleted) return;
     var revision = session.Snapshot.Revision;
@@ -112,7 +137,7 @@ void BeginPersistence(bool loading)
         {
             if (loading)
             {
-                var document = await store.LoadAsync(lifetime.Token).ConfigureAwait(false);
+                var document = await new JsonGameStore(loadPath ?? store.Path).LoadAsync(lifetime.Token).ConfigureAwait(false);
                 var prepared = await Task.Run(() => session.PrepareLoad(document, lifetime.Token), lifetime.Token).ConfigureAwait(false);
                 await system.InvokeAsync(() =>
                 {
@@ -131,7 +156,7 @@ void BeginPersistence(bool loading)
             }
             else
             {
-                await store.SaveAsync(snapshot, lifetime.Token).ConfigureAwait(false);
+                await library.SaveAsync(snapshot, DateTime.Now, lifetime.Token).ConfigureAwait(false);
                 await NoticeAsync("Game saved. F5:save F9:load");
             }
         }
